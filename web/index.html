@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Realtime Whisper Diarization</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>Realtime Whisper Diarization</h1>
+        <p class="subtitle">Thu mic trực tiếp — nhận diện giọng nói &amp; speaker theo thời gian thực.</p>
+      </header>
+
+      <section class="controls">
+        <div class="control-group">
+          <label for="language">Language:</label>
+          <select id="language">
+            <option value="vi" selected>Tiếng Việt</option>
+            <option value="en">English</option>
+            <option value="zh">Chinese</option>
+            <option value="ja">Japanese</option>
+            <option value="ko">Korean</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="es">Spanish</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <button id="startBtn" class="btn btn-primary">
+            <span class="icon">●</span> Bắt đầu
+          </button>
+          <button id="stopBtn" class="btn btn-danger" disabled>
+            <span class="icon">■</span> Dừng
+          </button>
+          <button id="clearBtn" class="btn btn-secondary">
+            <span class="icon">✕</span> Xóa transcript
+          </button>
+        </div>
+      </section>
+
+      <section class="status-bar">
+        <div class="status-item">
+          <span class="status-label">Trạng thái:</span>
+          <span id="status" class="status-value">Idle</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Speaker:</span>
+          <span id="activeSpeaker" class="status-value speaker-value">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Độ trễ xử lý:</span>
+          <span id="latency" class="status-value">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Realtime Factor:</span>
+          <span id="rtf" class="status-value">-</span>
+        </div>
+      </section>
+
+      <section class="transcript-section">
+        <div class="transcript-header">
+          <h2>Transcript</h2>
+          <span id="lineCount" class="line-count">0 dòng</span>
+        </div>
+        <div id="transcript" class="transcript"></div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

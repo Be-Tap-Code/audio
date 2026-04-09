@@ -1,6 +1,34 @@
-nemo_toolkit[asr]>=2.5.0
-nltk
-faster-whisper>=1.1.0
-git+https://github.com/MahmoudAshraf97/demucs.git
-git+https://github.com/oliverguhr/deepmultilingualpunctuation.git
-git+https://github.com/MahmoudAshraf97/ctc-forced-aligner.git
+# Core dependencies
+nltk>=3.8.0,<4.0.0
+omegaconf>=2.3.0,<3.0.0
+
+# Whisper transcription
+faster-whisper>=1.0.0,<2.0.0
+
+# Forced alignment
+ctc-forced-aligner>=0.3.0,<1.0.0
+
+# Punctuation restoration
+deepmultilingualpunctuation>=1.0.0,<2.0.0
+
+# Speaker diarization (NeMo backends)
+nemo-toolkit[asr]>=2.5.0,<3.0.0
+
+# Source separation
+demucs>=4.0.0,<5.0.0
+
+# Audio / numeric runtime
+soundfile>=0.12.0,<1.0.0
+numpy>=1.23.0,<2.0.0
+
+# Web realtime demo
+fastapi>=0.116.0,<1.0.0
+uvicorn[standard]>=0.35.0,<1.0.0
+
+# Note: torch, torchaudio, torchvision, and torchcodec should be installed
+# separately from the PyTorch index matching your CUDA version:
+#   pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cu130
+#
+# torchcodec is optional - torchaudio.save() will fallback to soundfile
+# if torchcodec is not available or fails to load (e.g., missing CUDA libraries).
+# If demucs fails with libtorchcodec errors, the soundfile fallback will be used.

@@ -93,6 +93,14 @@ parser.add_argument(
     help="Choose the diarization model to use",
 )
 
+parser.add_argument(
+    "--no-speaker-realignment",
+    action="store_true",
+    default=False,
+    help="Disable speaker realignment based on punctuation. "
+    "Useful for languages without clear punctuation or alternating speakers.",
+)
+
 args = parser.parse_args()
 language = process_language_arg(args.language, args.model_name)
 
@@ -104,19 +112,21 @@ if args.stemming:
         f'"{args.audio}" -o "{temp_path}" --device "{args.device}"'
     )
 
-    if return_code != 0:
+    vocals_path = os.path.join(
+        temp_path,
+        "htdemucs",
+        os.path.splitext(os.path.basename(args.audio))[0],
+        "vocals.wav",
+    )
+
+    if return_code != 0 or not os.path.exists(vocals_path):
         logging.warning(
             "Source splitting failed, using original audio file. "
             "Use --no-stem argument to disable it."
         )
         vocal_target = args.audio
     else:
-        vocal_target = os.path.join(
-            temp_path,
-            "htdemucs",
-            os.path.splitext(os.path.basename(args.audio))[0],
-            "vocals.wav",
-        )
+        vocal_target = vocals_path
 else:
     vocal_target = args.audio
 
@@ -232,7 +242,11 @@ else:
         " Using the original punctuation."
     )
 
-wsm = get_realigned_ws_mapping_with_punctuation(wsm)
+if args.no_speaker_realignment:
+    logging.info("Speaker realignment is disabled.")
+else:
+    wsm = get_realigned_ws_mapping_with_punctuation(wsm)
+
 ssm = get_sentences_speaker_mapping(wsm, speaker_ts)
 
 with open(f"{os.path.splitext(args.audio)[0]}.txt", "w", encoding="utf-8-sig") as f:

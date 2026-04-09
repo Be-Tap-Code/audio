@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(pip show *)",
+      "Bash(pip uninstall *)",
+      "Bash(pip install *)",
+      "Bash(apt-get *)",
+      "Bash(find *)",
+      "Bash(pip list)",
+      "Bash(rm *)",
+      "Bash(pip cache *)",
+      "Bash(nm *)",
+      "Bash(sleep *)",
+      "Bash(curl *)",
+      "Bash(pkill *)",
+      "Bash(nohup *)",
+      "Bash(timeout *)"
+    ]
+  },
+  "$version": 3
+}
