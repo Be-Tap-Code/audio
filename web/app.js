@@ -76,7 +76,6 @@ function addTranscriptLine(item) {
 
 function updateLatency(ms) {
   latencyEl.textContent = `${ms}ms`;
-  // Color coding: green < 1s, yellow < 3s, red > 3s
   if (ms < 1000) {
     latencyEl.style.color = "var(--ok)";
   } else if (ms < 3000) {
@@ -194,7 +193,6 @@ async function startStreaming() {
     }
 
     if (payload.type === "no_speech") {
-      // Silently skip
       return;
     }
 
@@ -215,9 +213,9 @@ async function startStreaming() {
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
         sampleRate: { ideal: 48000 },
       },
     });
@@ -229,7 +227,6 @@ async function startStreaming() {
   audioContext = new (window.AudioContext || window.webkitAudioContext)();
   sourceNode = audioContext.createMediaStreamSource(mediaStream);
 
-  // Use larger buffer for more stable processing
   const bufferSize = 4096;
   processorNode = audioContext.createScriptProcessor(bufferSize, 1, 1);
   muteGain = audioContext.createGain();
@@ -251,7 +248,6 @@ async function startStreaming() {
 }
 
 async function stopStreaming() {
-  // Disconnect audio nodes
   if (processorNode) {
     processorNode.disconnect();
     processorNode.onaudioprocess = null;
@@ -268,19 +264,16 @@ async function stopStreaming() {
     muteGain = null;
   }
 
-  // Stop microphone
   if (mediaStream) {
     mediaStream.getTracks().forEach((track) => track.stop());
     mediaStream = null;
   }
 
-  // Close audio context
   if (audioContext) {
     await audioContext.close();
     audioContext = null;
   }
 
-  // Close WebSocket
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "stop" }));
     ws.close();

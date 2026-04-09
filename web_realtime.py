@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,16 +11,25 @@ import numpy as np
 import torch
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from diarization import SortformerDiarizer
 from helpers import (
     find_numeral_symbol_tokens,
     get_realigned_ws_mapping_with_punctuation,
-    get_sentences_speaker_mapping,
     get_words_speaker_mapping,
 )
+
+# Optional: speaker identification
+try:
+    from speaker_identification import SpeakerIdentifier, DEFAULT_THRESHOLD
+
+    SPEAKER_ID_AVAILABLE = True
+except ImportError:
+    SPEAKER_ID_AVAILABLE = False
+    SpeakerIdentifier = None
+    DEFAULT_THRESHOLD = 0.65
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,22 +41,21 @@ logger = logging.getLogger("realtime-diarization")
 # Configuration
 # ============================================================
 SAMPLE_RATE = 16000
-# Process every 3 seconds of audio (balance between latency and accuracy)
-CHUNK_SECONDS = 3.0
+CHUNK_SECONDS = float(os.environ.get("REALTIME_CHUNK_SECONDS", "3.0"))
 CHUNK_SAMPLES = int(SAMPLE_RATE * CHUNK_SECONDS)
-# Minimum audio needed before first processing
-MIN_INITIAL_SAMPLES = int(SAMPLE_RATE * 2.0)  # 2 seconds
-
-# Maximum audio history to keep for Sortformer context (10 seconds)
-MAX_CONTEXT_SAMPLES = SAMPLE_RATE * 10
-
-# VAD threshold (RMS energy)
-VAD_THRESHOLD = 0.01
+MAX_CONTEXT_SECONDS = float(os.environ.get("REALTIME_MAX_CONTEXT_SECONDS", "12.0"))
+MAX_CONTEXT_SAMPLES = int(SAMPLE_RATE * MAX_CONTEXT_SECONDS)
+VAD_THRESHOLD = float(os.environ.get("REALTIME_VAD_THRESHOLD", "0.01"))
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-WHISPER_MODEL_SIZE = "medium"
+WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "large-v2")
 DIARIZER_NAME = "sortformer"
-DEFAULT_LANGUAGE = "vi"
+DEFAULT_LANGUAGE = os.environ.get("DEFAULT_LANGUAGE", "vi")
+
+# Speaker identification config
+SPEAKER_ID_ENABLED = False
+SPEAKER_DB_PATH = os.environ.get("SPEAKER_DB_PATH", "speaker_db.json")
+SPEAKER_ID_THRESHOLD = float(os.environ.get("SPEAKER_ID_THRESHOLD", str(DEFAULT_THRESHOLD)))
 
 app = FastAPI(title="Realtime Whisper Diarization")
 app.mount("/static", StaticFiles(directory="web"), name="static")
@@ -68,12 +77,33 @@ whisper_model = faster_whisper.WhisperModel(
     compute_type=_choose_compute_type(),
 )
 suppress_tokens = find_numeral_symbol_tokens(whisper_model.hf_tokenizer)
-
-# Use batched pipeline for faster inference
 whisper_pipeline = faster_whisper.BatchedInferencePipeline(whisper_model)
 
 logger.info("Loading %s diarizer on %s", DIARIZER_NAME, DEVICE)
 diarizer = SortformerDiarizer(device=DEVICE)
+
+speaker_identifier = None
+if SPEAKER_ID_AVAILABLE and os.path.exists(SPEAKER_DB_PATH):
+    try:
+        speaker_identifier = SpeakerIdentifier(
+            device=DEVICE,
+            db_path=SPEAKER_DB_PATH,
+            threshold=SPEAKER_ID_THRESHOLD,
+        )
+        if speaker_identifier.db.get_count() > 0:
+            SPEAKER_ID_ENABLED = True
+            logger.info(
+                "Speaker identification enabled: %d speakers loaded",
+                speaker_identifier.db.get_count(),
+            )
+        else:
+            speaker_identifier = None
+            logger.info("Speaker database empty - identification disabled")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to init speaker identifier: %s", exc)
+        speaker_identifier = None
+else:
+    logger.info("Speaker identification not available (db: %s)", SPEAKER_DB_PATH)
 
 
 # ============================================================
@@ -82,15 +112,10 @@ diarizer = SortformerDiarizer(device=DEVICE)
 @dataclass
 class SessionState:
     language: str = DEFAULT_LANGUAGE
-    # Raw PCM16 bytes accumulated from client
     audio_buffer: bytearray = field(default_factory=bytearray)
-    # Total samples processed (for offset calculation)
+    context_buffer: bytearray = field(default_factory=bytearray)
     processed_samples: int = 0
-    # Previous diarization result for merging
-    previous_utterances: list = field(default_factory=list)
-    # Flag to indicate if we should use the full pipeline or fast mode
-    first_chunk: bool = True
-    # Cumulative transcript for the session
+    last_emitted_ms: int = 0
     all_transcripts: list = field(default_factory=list)
 
 
@@ -107,7 +132,7 @@ def _compute_rms(audio: np.ndarray) -> float:
     """Compute RMS energy of audio signal."""
     if len(audio) == 0:
         return 0.0
-    return float(np.sqrt(np.mean(audio ** 2)))
+    return float(np.sqrt(np.mean(audio**2)))
 
 
 def _is_speech(audio: np.ndarray, threshold: float = VAD_THRESHOLD) -> bool:
@@ -115,11 +140,24 @@ def _is_speech(audio: np.ndarray, threshold: float = VAD_THRESHOLD) -> bool:
     return _compute_rms(audio) > threshold
 
 
+def _append_context(state: SessionState, raw_chunk: bytes) -> tuple[np.ndarray, int]:
+    """Append a chunk to the rolling context and return the current window and its offset."""
+    state.context_buffer.extend(raw_chunk)
+    max_context_bytes = MAX_CONTEXT_SAMPLES * 2
+    if len(state.context_buffer) > max_context_bytes:
+        del state.context_buffer[: len(state.context_buffer) - max_context_bytes]
+
+    context_samples = len(state.context_buffer) // 2
+    context_start_samples = max(0, state.processed_samples - context_samples)
+    context_offset_ms = int(context_start_samples * 1000 / SAMPLE_RATE)
+    return _pcm16_to_float32(bytes(state.context_buffer)), context_offset_ms
+
+
 # ============================================================
 # Transcription + Diarization
 # ============================================================
 def _transcribe_chunk(audio: np.ndarray, language: str) -> list[dict]:
-    """Run Whisper transcription on audio chunk with word timestamps."""
+    """Run Whisper transcription on audio window with word timestamps."""
     segments, _info = whisper_pipeline.transcribe(
         audio,
         language=language,
@@ -137,64 +175,103 @@ def _transcribe_chunk(audio: np.ndarray, language: str) -> list[dict]:
             token_text = (word.word or "").strip()
             if not token_text:
                 continue
-            word_timestamps.append({
-                "start": float(word.start),
-                "end": float(word.end),
-                "text": token_text,
-            })
+            word_timestamps.append(
+                {
+                    "start": float(word.start),
+                    "end": float(word.end),
+                    "text": token_text,
+                }
+            )
 
     return word_timestamps
 
 
 def _diarize_chunk(audio: np.ndarray) -> list[tuple]:
-    """Run Sortformer diarization on audio chunk."""
-    speaker_ts = diarizer.diarize(torch.from_numpy(audio).unsqueeze(0))
-    return speaker_ts
+    """Run Sortformer diarization on audio window."""
+    return diarizer.diarize(torch.from_numpy(audio).unsqueeze(0))
 
 
 def _process_audio_chunk(
     audio: np.ndarray,
     offset_ms: int,
     language: str,
+    emit_from_ms: int = 0,
     use_diarization: bool = True,
-) -> list[dict]:
-    """Transcribe and optionally diarize an audio chunk."""
-    # Transcription
+) -> tuple[list[dict], list[tuple]]:
+    """Transcribe and optionally diarize an audio window."""
     word_timestamps = _transcribe_chunk(audio, language)
     if not word_timestamps:
-        return []
+        return [], []
 
     if not use_diarization:
-        # Fast mode: no diarization, just return text with timestamps
         items = []
-        for w in word_timestamps:
-            items.append({
-                "speaker": "Speaker 0",
-                "start_ms": int(w["start"] * 1000) + offset_ms,
-                "end_ms": int(w["end"] * 1000) + offset_ms,
-                "text": w["text"],
-            })
-        return items
+        for word in word_timestamps:
+            end_ms = int(word["end"] * 1000) + offset_ms
+            if end_ms <= emit_from_ms:
+                continue
+            items.append(
+                {
+                    "speaker": "Speaker 0",
+                    "start_ms": int(word["start"] * 1000) + offset_ms,
+                    "end_ms": end_ms,
+                    "text": word["text"],
+                }
+            )
+        return items, []
 
-    # Diarization
     speaker_ts = _diarize_chunk(audio)
     if not speaker_ts:
-        # Fallback if diarizer returns nothing
         items = []
-        for w in word_timestamps:
-            items.append({
-                "speaker": "Speaker 0",
-                "start_ms": int(w["start"] * 1000) + offset_ms,
-                "end_ms": int(w["end"] * 1000) + offset_ms,
-                "text": w["text"],
-            })
-        return items
+        for word in word_timestamps:
+            end_ms = int(word["end"] * 1000) + offset_ms
+            if end_ms <= emit_from_ms:
+                continue
+            items.append(
+                {
+                    "speaker": "Speaker 0",
+                    "start_ms": int(word["start"] * 1000) + offset_ms,
+                    "end_ms": end_ms,
+                    "text": word["text"],
+                }
+            )
+        return items, []
 
-    # Merge word timestamps with speaker labels
-    wsm = get_words_speaker_mapping(word_timestamps, speaker_ts, word_anchor_option="mid")
+    wsm = get_words_speaker_mapping(word_timestamps, speaker_ts, word_anchor_option="start")
+    wsm = get_realigned_ws_mapping_with_punctuation(wsm)
+    wsm = [item for item in wsm if int(item["end_time"]) + offset_ms > emit_from_ms]
+    if not wsm:
+        return [], speaker_ts
 
-    # Convert to utterances (group consecutive words from same speaker)
     utterances = _words_to_utterances(wsm, offset_ms)
+
+    if SPEAKER_ID_ENABLED:
+        utterances = _resolve_speaker_names(utterances, speaker_ts, audio)
+
+    return utterances, speaker_ts
+
+
+def _resolve_speaker_names(
+    utterances: list[dict],
+    speaker_ts: list[tuple],
+    audio: np.ndarray,
+) -> list[dict]:
+    """Replace 'Speaker N' with actual names using speaker identification."""
+    if not speaker_identifier or not speaker_ts:
+        return utterances
+
+    try:
+        name_map = speaker_identifier.identify_speaker_names(
+            speaker_ts,
+            torch.from_numpy(audio).unsqueeze(0),
+        )
+        if name_map:
+            for utt in utterances:
+                spk_id = int(utt["speaker"].split()[-1])
+                if spk_id in name_map:
+                    utt["speaker"] = name_map[spk_id]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Speaker identification failed: %s", exc)
+
     return utterances
 
 
@@ -218,7 +295,11 @@ def _words_to_utterances(
         if not word:
             continue
 
-        if current is None or current["speaker"] != speaker:
+        should_split = current is None or current["speaker"] != speaker
+        if current is not None and current["text"].rstrip().endswith((".", "?", "!")):
+            should_split = True
+
+        if should_split:
             current = {
                 "speaker": speaker,
                 "start_ms": start_ms,
@@ -242,68 +323,113 @@ def index() -> HTMLResponse:
     return HTMLResponse(html_path.read_text(encoding="utf-8"))
 
 
+@app.get("/api/speakers")
+def list_speakers():
+    """List all registered speakers."""
+    if not speaker_identifier:
+        return {"enabled": False, "speakers": []}
+    return {
+        "enabled": True,
+        "speakers": speaker_identifier.list_speakers(),
+        "threshold": SPEAKER_ID_THRESHOLD,
+    }
+
+
+@app.post("/api/speakers/register")
+async def register_speaker(name: str, audio_path: str):
+    """Register a new speaker from audio file."""
+    if not speaker_identifier:
+        return {"error": "Speaker identification not enabled"}
+    try:
+        speaker_identifier.register_speaker(name, audio_path)
+        return {"status": "ok", "message": f"Registered: {name}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
+@app.delete("/api/speakers/{name}")
+def remove_speaker(name: str):
+    """Remove a speaker from database."""
+    if not speaker_identifier:
+        return {"error": "Speaker identification not enabled"}
+    if speaker_identifier.remove_speaker(name):
+        return {"status": "ok", "message": f"Removed: {name}"}
+    return {"error": f"Speaker not found: {name}"}
+
+
 @app.websocket("/ws/realtime")
 async def realtime_ws(websocket: WebSocket):
     await websocket.accept()
     state = SessionState()
-    await websocket.send_text(json.dumps({
-        "type": "ready",
-        "sample_rate": SAMPLE_RATE,
-        "chunk_seconds": CHUNK_SECONDS,
-        "model": WHISPER_MODEL_SIZE,
-    }))
+    await websocket.send_text(
+        json.dumps(
+            {
+                "type": "ready",
+                "sample_rate": SAMPLE_RATE,
+                "chunk_seconds": CHUNK_SECONDS,
+                "model": WHISPER_MODEL_SIZE,
+                "speaker_id": {
+                    "enabled": SPEAKER_ID_ENABLED,
+                    "speaker_count": speaker_identifier.db.get_count() if speaker_identifier else 0,
+                },
+            }
+        )
+    )
     logger.info("Client connected")
 
     try:
         while True:
             message = await websocket.receive()
 
-            # Handle binary audio data
             if "bytes" in message and message["bytes"] is not None:
                 state.audio_buffer.extend(message["bytes"])
 
-                # Process when we have enough samples
                 while len(state.audio_buffer) >= CHUNK_SAMPLES * 2:
-                    raw = bytes(state.audio_buffer[:CHUNK_SAMPLES * 2])
-                    del state.audio_buffer[:CHUNK_SAMPLES * 2]
+                    raw = bytes(state.audio_buffer[: CHUNK_SAMPLES * 2])
+                    del state.audio_buffer[: CHUNK_SAMPLES * 2]
 
-                    offset_ms = int(state.processed_samples * 1000 / SAMPLE_RATE)
                     state.processed_samples += CHUNK_SAMPLES
+                    chunk_audio = _pcm16_to_float32(raw)
 
-                    audio = _pcm16_to_float32(raw)
-
-                    # Simple VAD: skip silent chunks
-                    if not _is_speech(audio):
-                        logger.debug("Skipping silent chunk (RMS=%.4f)", _compute_rms(audio))
+                    if not _is_speech(chunk_audio):
+                        logger.debug("Skipping silent chunk (RMS=%.4f)", _compute_rms(chunk_audio))
                         continue
 
+                    context_audio, context_offset_ms = _append_context(state, raw)
                     start_time = time.time()
 
-                    # Run transcription + diarization
-                    utterances = await asyncio.to_thread(
+                    utterances, speaker_ts = await asyncio.to_thread(
                         _process_audio_chunk,
-                        audio,
-                        offset_ms,
+                        context_audio,
+                        context_offset_ms,
                         state.language,
-                        use_diarization=True,
+                        state.last_emitted_ms,
+                        True,
                     )
 
                     elapsed_ms = int((time.time() - start_time) * 1000)
 
                     if utterances:
-                        # Store for history
+                        state.last_emitted_ms = max(
+                            state.last_emitted_ms,
+                            max(item["end_ms"] for item in utterances),
+                        )
                         state.all_transcripts.extend(utterances)
 
-                        # Send to client
-                        await websocket.send_text(json.dumps({
-                            "type": "transcript",
-                            "items": utterances,
-                            "active_speaker": utterances[-1]["speaker"],
-                            "processing_ms": elapsed_ms,
-                            "realtime_factor": round(
-                                (CHUNK_SECONDS * 1000) / max(elapsed_ms, 1), 2
-                            ),
-                        }, ensure_ascii=False))
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "type": "transcript",
+                                    "items": utterances,
+                                    "active_speaker": utterances[-1]["speaker"],
+                                    "processing_ms": elapsed_ms,
+                                    "realtime_factor": round(
+                                        (CHUNK_SECONDS * 1000) / max(elapsed_ms, 1), 2
+                                    ),
+                                },
+                                ensure_ascii=False,
+                            )
+                        )
                         logger.info(
                             "Processed chunk in %dms (RTF=%.2f): %s",
                             elapsed_ms,
@@ -311,13 +437,15 @@ async def realtime_ws(websocket: WebSocket):
                             utterances[-1]["text"][:50],
                         )
                     else:
-                        # Send empty result to keep client alive
-                        await websocket.send_text(json.dumps({
-                            "type": "no_speech",
-                            "offset_ms": offset_ms,
-                        }))
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "type": "no_speech",
+                                    "offset_ms": context_offset_ms,
+                                }
+                            )
+                        )
 
-            # Handle text messages (config, stop, etc.)
             elif "text" in message and message["text"] is not None:
                 payload = json.loads(message["text"])
 
@@ -325,10 +453,14 @@ async def realtime_ws(websocket: WebSocket):
                     if payload.get("language"):
                         state.language = str(payload["language"]).lower()
                         logger.info("Language changed to: %s", state.language)
-                    await websocket.send_text(json.dumps({
-                        "type": "ack",
-                        "message": f"Language set to {state.language}",
-                    }))
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "ack",
+                                "message": f"Language set to {state.language}",
+                            }
+                        )
+                    )
 
                 elif payload.get("type") == "stop":
                     await websocket.send_text(json.dumps({"type": "stopped"}))
@@ -339,10 +471,14 @@ async def realtime_ws(websocket: WebSocket):
     except Exception as exc:  # noqa: BLE001
         logger.exception("Realtime session error: %s", exc)
         try:
-            await websocket.send_text(json.dumps({
-                "type": "error",
-                "message": str(exc),
-            }))
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "error",
+                        "message": str(exc),
+                    }
+                )
+            )
         except Exception:
             pass
     finally:

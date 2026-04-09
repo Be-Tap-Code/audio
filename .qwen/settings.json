@@ -15,7 +15,9 @@
       "Bash(curl *)",
       "Bash(pkill *)",
       "Bash(nohup *)",
-      "Bash(timeout *)"
+      "Bash(timeout *)",
+      "Bash(mkdir *)",
+      "Bash(ffmpeg *)"
     ]
   },
   "$version": 3

@@ -1,7 +1,15 @@
 __pycache__/
-*.srt
-*.txt
-*.wav
-*.mp3
-*.m4a
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.tmp/
+.qwen/
 
+# Generated outputs
+*.srt
+*.flac
+*.ogg
+*.opus
+temp_outputs_*/

@@ -1,0 +1,17 @@
+﻿cLuna: Chào bạn, công việc hôm nay của bạn như thế nào?  
+
+Quan: Chào bạn, hôm nay mình tạm ổn, còn bạn thì sao?  
+
+cLuna: Công việc của Huỳnh hôm nay rất là nhiều.  Hiện tại mình vẫn chưa làm xong việc.  
+
+Quan: Bạn khỏe không?  
+
+cLuna: Mình ổn, còn bạn thì sao?  
+
+Quan: Mình không khỏe lắm.  Bạn có gia đình chưa?  
+
+cLuna: Mình có gia đình rồi.  Còn bạn thì sao?  
+
+Quan: Bạn hiện tại học lớp mấy?  
+
+cLuna: Mình đi làm rồi.  Mình đang rất muốn đi học nhưng chưa có thời gian.  
