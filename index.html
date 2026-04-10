@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ thống ghi chép tự động</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 20px 0;
+        }
+
+        header h1 {
+            font-size: 2rem;
+            color: #1a1a1a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        header h1 .icon {
+            font-size: 1.5rem;
+        }
+
+        .main-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .card-header {
+            background: #1f2937;
+            color: white;
+            padding: 15px 20px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .form-group label {
+            font-size: 0.875rem;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .file-input-wrapper {
+            display: flex;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .file-input-wrapper button {
+            background: #f3f4f6;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            color: #374151;
+            border-right: 1px solid #d1d5db;
+        }
+
+        .file-input-wrapper button:hover {
+            background: #e5e7eb;
+        }
+
+        .file-input-wrapper input[type="file"] {
+            display: none;
+        }
+
+        .file-input-wrapper .file-name {
+            padding: 10px 15px;
+            flex: 1;
+            background: white;
+            color: #666;
+            font-size: 0.875rem;
+        }
+
+        select, input[type="text"] {
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            background: white;
+            cursor: pointer;
+        }
+
+        select:hover, input[type="text"]:hover {
+            border-color: #9ca3af;
+        }
+
+        select:focus, input[type="text"]:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .btn-submit {
+            width: 100%;
+            padding: 12px 20px;
+            background: #1f2937;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: background 0.2s;
+        }
+
+        .btn-submit:hover:not(:disabled) {
+            background: #374151;
+        }
+
+        .btn-submit:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .status-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .status-title {
+            font-size: 0.875rem;
+            color: #666;
+            font-weight: 500;
+            margin-bottom: 10px;
+        }
+
+        .status-value {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 10px;
+        }
+
+        .status-value.processing {
+            color: #f59e0b;
+        }
+
+        .status-value.done {
+            color: #10b981;
+        }
+
+        .status-value.error {
+            color: #ef4444;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: #3b82f6;
+            transition: width 0.3s ease;
+        }
+
+        .btn-download {
+            padding: 8px 15px;
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            color: #374151;
+            transition: all 0.2s;
+        }
+
+        .btn-download:hover {
+            background: #f3f4f6;
+            border-color: #9ca3af;
+        }
+
+        .preview-section {
+            margin-top: 20px;
+        }
+
+        .preview-title {
+            font-size: 0.875rem;
+            color: #666;
+            font-weight: 500;
+            margin-bottom: 10px;
+        }
+
+        .preview-content {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .preview-content .speaker-0 {
+            color: #2563eb;
+        }
+
+        .preview-content .speaker-1 {
+            color: #16a34a;
+        }
+
+        .preview-content .speaker-2 {
+            color: #dc2626;
+        }
+
+        .preview-content .speaker-3 {
+            color: #9333ea;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .error-message {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #dc2626;
+            padding: 10px 15px;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 0.875rem;
+        }
+
+        .warning-message {
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            color: #92400e;
+            padding: 10px 15px;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 0.875rem;
+        }
+
+        .form-hint {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 5px;
+        }
+
+        .speaker-info {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 10px;
+            padding: 8px 12px;
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            color: #0369a1;
+        }
+
+        @media (max-width: 768px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>
+                <span class="icon">🎙️</span>
+                Hệ thống ghi chép tự động
+            </h1>
+        </header>
+
+        <div class="main-card">
+            <div class="card-header">
+                <span>🎙️</span>
+                Audio
+            </div>
+            <div class="card-body">
+                <form id="uploadForm">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Media File (Audio: mp3, wav)</label>
+                            <div class="file-input-wrapper">
+                                <button type="button" onclick="document.getElementById('fileInput').click()">Choose File</button>
+                                <input type="file" id="fileInput" accept=".mp3,.wav,.m4a,.flac,.ogg,.webm" />
+                                <span class="file-name" id="fileName">No file chosen</span>
+                            </div>
+                            <div class="form-hint">
+                                ⚠️ Maximum duration: <strong>45 minutes</strong> | 
+                                💡 Work better: <strong>≤8 speakers</strong>
+                            </div>
+                        </div>
+                        <!-- Model selection hidden; default model is used implicitly -->
+                        <div class="form-group">
+                            <label>Language</label>
+                            <select id="languageSelect">
+                                <option value="vi" selected>Tiếng Việt</option>
+                                <option value="en">English</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-submit" id="submitBtn">
+                        <span>🚀</span>
+                        <span>Bắt đầu xử lý</span>
+                    </button>
+                </form>
+
+                <div class="status-section hidden" id="statusSection">
+                    <div class="status-title">Trạng thái</div>
+                    <div class="status-value" id="statusValue">Đang chờ...</div>
+                    <div class="progress-bar hidden" id="progressBar">
+                        <div class="progress-bar-fill" id="progressFill" style="width: 0%"></div>
+                    </div>
+                    <div class="speaker-info hidden" id="speakerInfo">
+                        <span></span>
+                        <span id="speakerCount"></span>
+                    </div>
+                    <button class="btn-download hidden" id="downloadBtn" onclick="downloadResult()">
+                        <span>📄</span>
+                        <span>Tải .txt</span>
+                    </button>
+                    <div class="warning-message hidden" id="warningMessage"></div>
+                </div>
+
+                <div class="preview-section hidden" id="previewSection">
+                    <div class="preview-title">Xem trước</div>
+                    <div class="preview-content" id="previewContent"></div>
+                </div>
+
+                <div class="error-message hidden" id="errorMessage"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTaskId = null;
+        let statusCheckInterval = null;
+
+        // File input change handler
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                document.getElementById('fileName').textContent = file.name;
+            } else {
+                document.getElementById('fileName').textContent = 'No file chosen';
+            }
+        });
+
+        // Form submit handler
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                showError('Vui lòng chọn file audio');
+                return;
+            }
+
+            const model = 'nova-3'; // default model, do not expose selection
+            const language = document.getElementById('languageSelect').value;
+
+            // Show status section
+            document.getElementById('statusSection').classList.remove('hidden');
+            document.getElementById('previewSection').classList.add('hidden');
+            document.getElementById('errorMessage').classList.add('hidden');
+            document.getElementById('downloadBtn').classList.add('hidden');
+            document.getElementById('progressBar').classList.remove('hidden');
+            document.getElementById('speakerInfo').classList.add('hidden');
+            document.getElementById('warningMessage').classList.add('hidden');
+
+            // Disable submit button
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('submitBtn').querySelector('span:last-child').textContent = 'Đang xử lý...';
+
+            // Update status
+            updateStatus('processing', 'Đang tải lên...');
+            updateProgress(10);
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('model', model);
+                formData.append('language', language);
+
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Upload failed');
+                }
+
+                const data = await response.json();
+                currentTaskId = data.task_id;
+
+                updateStatus('processing', 'Đang xử lý...');
+                updateProgress(30);
+
+                // Start polling for status
+                startStatusPolling();
+
+            } catch (error) {
+                showError(error.message);
+                resetForm();
+            }
+        });
+
+        function startStatusPolling() {
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+            }
+
+            statusCheckInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/status/${currentTaskId}`);
+                    if (!response.ok) {
+                        throw new Error('Failed to get status');
+                    }
+
+                    const data = await response.json();
+
+                    if (data.status === 'done') {
+                        clearInterval(statusCheckInterval);
+                        updateStatus('done', 'DONE');
+                        updateProgress(100);
+
+                        // Show speaker count
+                        if (data.result.num_speakers) {
+                            document.getElementById('speakerInfo').classList.remove('hidden');
+                            document.getElementById('speakerCount').textContent = 
+                                `Detected ${data.result.num_speakers} speaker${data.result.num_speakers > 1 ? 's' : ''}`;
+                            
+                            // Show warning if too many speakers
+                            if (data.result.warning) {
+                                document.getElementById('warningMessage').textContent = data.result.warning;
+                                document.getElementById('warningMessage').classList.remove('hidden');
+                            }
+                        }
+
+                        // Show download button
+                        document.getElementById('downloadBtn').classList.remove('hidden');
+
+                        // Show preview
+                        showPreview(data.result.output_text);
+
+                        // Reset form
+                        resetForm();
+                    } else if (data.status === 'error') {
+                        clearInterval(statusCheckInterval);
+                        showError(data.error || 'Processing failed');
+                        resetForm();
+                    } else {
+                        // Still processing
+                        updateProgress(30 + (data.progress || 0) * 0.6);
+                    }
+
+                } catch (error) {
+                    console.error('Status polling error:', error);
+                }
+            }, 2000);
+        }
+
+        function updateStatus(type, text) {
+            const statusValue = document.getElementById('statusValue');
+            statusValue.textContent = text;
+            statusValue.className = 'status-value';
+            if (type === 'processing') {
+                statusValue.classList.add('processing');
+            } else if (type === 'done') {
+                statusValue.classList.add('done');
+            } else if (type === 'error') {
+                statusValue.classList.add('error');
+            }
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progressFill').style.width = percent + '%';
+        }
+
+        function showPreview(text) {
+            const previewContent = document.getElementById('previewContent');
+            // Color-code speakers
+            const coloredText = text.replace(/\[Speaker:(\d+)\]/g, '<span class="speaker-$1">[Speaker:$1]</span>');
+            previewContent.innerHTML = coloredText;
+            document.getElementById('previewSection').classList.remove('hidden');
+        }
+
+        function showError(message) {
+            const errorMessage = document.getElementById('errorMessage');
+            errorMessage.textContent = message;
+            errorMessage.classList.remove('hidden');
+        }
+
+        function resetForm() {
+            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('submitBtn').querySelector('span:last-child').textContent = 'Bắt đầu xử lý';
+        }
+
+        async function downloadResult() {
+            if (!currentTaskId) return;
+
+            try {
+                const response = await fetch(`/api/download/${currentTaskId}/txt`);
+                if (!response.ok) {
+                    throw new Error('Download failed');
+                }
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = response.headers.get('content-disposition')?.split('filename=')[1] || 'output.txt';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                showError(error.message);
+            }
+        }
+
+        // Health check on page load
+        async function checkHealth() {
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+                if (!data.api_key_configured) {
+                    showError('WARNING: DEEPGRAM_API_KEY not configured. Please check .env file.');
+                }
+            } catch (error) {
+                console.error('Health check error:', error);
+            }
+        }
+
+        checkHealth();
+    </script>
+</body>
+</html>

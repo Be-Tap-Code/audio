@@ -13,3 +13,4 @@ dist/
 *.ogg
 *.opus
 temp_outputs_*/
+*.env
